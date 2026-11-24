@@ -1,0 +1,14 @@
+node_modules/
+.next/
+apps/web/.next/
+out/
+apps/web/out/
+src/generated/prisma/
+apps/api/src/generated/prisma/
+storage/uploads/*
+!storage/uploads/.gitkeep
+.env
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+apps/web/next-env.d.ts

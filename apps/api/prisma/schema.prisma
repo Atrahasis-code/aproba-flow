@@ -1,0 +1,466 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+enum UserRole {
+  EMPLOYEE
+  MANAGER
+  SPECIAL_APPROVER_IT
+  FINANCE
+  TREASURY
+  DIRECTION
+  ADMIN
+}
+
+enum ProjectStatus {
+  ACTIVE
+  ON_HOLD
+  CLOSED
+}
+
+enum RequestType {
+  REIMBURSEMENT
+  ADVANCE
+  EXCESS
+}
+
+enum BudgetTargetType {
+  DEPARTMENT
+  PROJECT
+}
+
+enum ExpenseStatus {
+  DRAFT
+  PENDING_APPROVAL
+  OBSERVED
+  REJECTED
+  READY_FOR_DISBURSEMENT
+  DISBURSED_PENDING_SETTLEMENT
+  SETTLEMENT_IN_REVIEW
+  SETTLEMENT_OBSERVED
+  PENDING_RETURN
+  RETURN_SUBMITTED
+  EXCESS_PENDING_APPROVAL
+  READY_FOR_PAYMENT
+  CLOSED_SETTLED
+}
+
+enum ItemAuditStatus {
+  PENDING
+  APPROVED
+  PARTIALLY_APPROVED
+  REJECTED
+  OBSERVED
+}
+
+enum ApprovalPhase {
+  INITIAL_REQUEST
+  EXCESS_SETTLEMENT
+}
+
+enum ApprovalRoleType {
+  DIRECT_MANAGER
+  PROJECT_MANAGER
+  SPECIAL_IT
+  FINANCE
+  DIRECTION
+}
+
+enum ApprovalStepStatus {
+  WAITING
+  PENDING
+  APPROVED
+  REJECTED
+  OBSERVED
+  REASSIGNED
+  SKIPPED
+}
+
+enum FilePurpose {
+  RECEIPT
+  RETURN_DEPOSIT
+  PAYMENT_PROOF
+}
+
+enum NotificationType {
+  APPROVAL_REQUIRED
+  APPROVED
+  REJECTED
+  OBSERVED
+  BUDGET_ALERT_85
+  BUDGET_EXCEEDED_100
+  STALLED_48H
+  DISBURSED
+  RETURN_REQUIRED
+  RETURN_CONFIRMED
+  PAYMENT_EXECUTED
+  DELEGATION_ASSIGNED
+}
+
+model CodeCounter {
+  key       String @id
+  lastValue Int    @default(0)
+}
+
+model Branch {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
+  city      String
+  country   String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users User[]
+}
+
+model Department {
+  id         String   @id @default(cuid())
+  code       String   @unique
+  name       String
+  headUserId String?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  headUser        User?              @relation("DepartmentHead", fields: [headUserId], references: [id])
+  users           User[]             @relation("DepartmentMembers")
+  budgets         DepartmentBudget[]
+  expenseRequests ExpenseRequest[]
+}
+
+model DepartmentBudget {
+  id           String   @id @default(cuid())
+  departmentId String
+  year         Int
+  month        Int
+  amount       Decimal  @db.Decimal(12, 2)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+
+  @@unique([departmentId, year, month])
+  @@index([year, month])
+}
+
+model Project {
+  id          String        @id @default(cuid())
+  code        String        @unique
+  name        String
+  clientName  String
+  managerId   String
+  totalBudget Decimal       @db.Decimal(12, 2)
+  startDate   DateTime
+  endDate     DateTime?
+  status      ProjectStatus @default(ACTIVE)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  manager         User                @relation("ProjectManager", fields: [managerId], references: [id])
+  assignments     ProjectAssignment[]
+  expenseRequests ExpenseRequest[]
+
+  @@index([status])
+  @@index([managerId])
+}
+
+model ProjectAssignment {
+  id         String   @id @default(cuid())
+  projectId  String
+  userId     String
+  assignedAt DateTime @default(now())
+  isActive   Boolean  @default(true)
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@index([userId, isActive])
+}
+
+model User {
+  id                String     @id @default(cuid())
+  email             String     @unique
+  passwordHash      String
+  fullName          String
+  employeeCode      String     @unique
+  jobTitle          String
+  branchId          String
+  departmentId      String
+  managerId         String?
+  roles             UserRole[]
+  bankName          String?
+  bankAccountNumber String?
+  isActive          Boolean    @default(true)
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  branch     Branch     @relation(fields: [branchId], references: [id])
+  department Department @relation("DepartmentMembers", fields: [departmentId], references: [id])
+  manager    User?      @relation("ManagerSubordinates", fields: [managerId], references: [id])
+
+  subordinates            User[]               @relation("ManagerSubordinates")
+  headedDepartments       Department[]         @relation("DepartmentHead")
+  managedProjects         Project[]            @relation("ProjectManager")
+  projectAssignments      ProjectAssignment[]
+  expenseRequests         ExpenseRequest[]     @relation("RequestRequester")
+  budgetOverridesApproved ExpenseRequest[]     @relation("RequestBudgetOverrideBy")
+  returnsConfirmed        ExpenseRequest[]     @relation("RequestReturnConfirmedBy")
+  itemsAudited            ExpenseItem[]        @relation("ItemAuditedBy")
+  approvalStepsAssigned   ApprovalStep[]       @relation("StepAssignedApprover")
+  approvalStepsDelegated  ApprovalStep[]       @relation("StepDelegatedTo")
+  approvalStepsActed      ApprovalStep[]       @relation("StepActedBy")
+  delegationsGiven        ApprovalDelegation[] @relation("DelegationDelegator")
+  delegationsReceived     ApprovalDelegation[] @relation("DelegationDelegate")
+  delegationsCreated      ApprovalDelegation[] @relation("DelegationCreator")
+  uploadedFiles           StoredFile[]         @relation("FileUploader")
+  notifications           Notification[]
+  auditLogsActor          AuditLog[]           @relation("AuditActor")
+  auditLogsOnBehalf       AuditLog[]           @relation("AuditOnBehalfOf")
+
+  @@index([branchId])
+  @@index([departmentId])
+  @@index([managerId])
+}
+
+model Category {
+  id              String  @id @default(cuid())
+  code            String  @unique
+  name            String
+  accountCode     String
+  specialTag      String?
+  requiresReceipt Boolean @default(true)
+  isActive        Boolean @default(true)
+
+  expenseItems ExpenseItem[]
+}
+
+model SystemConfig {
+  id                       String   @id @default("singleton")
+  budgetAlertThresholdPct  Int      @default(85)
+  stalledHoursThreshold    Int      @default(48)
+  advanceSettlementDueDays Int      @default(15)
+  excessToleranceUsd       Decimal  @default(50.00) @db.Decimal(12, 2)
+  excessMediumMaxUsd       Decimal  @default(250.00) @db.Decimal(12, 2)
+  updatedAt                DateTime @updatedAt
+}
+
+model ApprovalRule {
+  id                 String      @id @default(cuid())
+  name               String
+  requestType        RequestType
+  categorySpecialTag String?
+  minAmount          Decimal     @db.Decimal(12, 2)
+  maxAmount          Decimal?    @db.Decimal(12, 2)
+  approverChain      Json
+  allowAutoApprove   Boolean     @default(false)
+  priority           Int         @default(10)
+  isActive           Boolean     @default(true)
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  @@index([requestType, isActive, priority])
+}
+
+model ApprovalDelegation {
+  id          String   @id @default(cuid())
+  delegatorId String
+  delegateId  String
+  startDate   DateTime
+  endDate     DateTime
+  reason      String
+  isActive    Boolean  @default(true)
+  createdById String
+  createdAt   DateTime @default(now())
+
+  delegator     User           @relation("DelegationDelegator", fields: [delegatorId], references: [id])
+  delegate      User           @relation("DelegationDelegate", fields: [delegateId], references: [id])
+  createdBy     User           @relation("DelegationCreator", fields: [createdById], references: [id])
+  approvalSteps ApprovalStep[]
+
+  @@index([delegatorId, isActive, startDate, endDate])
+  @@index([delegateId, isActive])
+}
+
+model ExpenseRequest {
+  id              String           @id @default(cuid())
+  code            String           @unique
+  type            RequestType
+  status          ExpenseStatus
+  requesterId     String
+  title           String
+  description     String?
+  travelStartDate DateTime?
+  travelEndDate   DateTime?
+
+  budgetTargetType BudgetTargetType
+  departmentId     String?
+  projectId        String?
+  budgetYear       Int
+  budgetMonth      Int
+
+  requestedAmount     Decimal @db.Decimal(12, 2)
+  disbursedAmount     Decimal @default(0) @db.Decimal(12, 2)
+  renderedAmount      Decimal @default(0) @db.Decimal(12, 2)
+  approvedAmount      Decimal @default(0) @db.Decimal(12, 2)
+  netSettlementAmount Decimal @default(0) @db.Decimal(12, 2)
+
+  budgetAlert85Triggered     Boolean   @default(false)
+  budgetUsagePctAtSubmit     Decimal   @default(0) @db.Decimal(6, 2)
+  budgetOverrideRequired     Boolean   @default(false)
+  budgetOverrideApprovedById String?
+  budgetOverrideReason       String?
+  budgetOverrideAt           DateTime?
+
+  currentStepEnteredAt DateTime?
+  disbursedAt          DateTime?
+  disbursementRef      String?
+  settlementDueDate    DateTime?
+  returnDepositRef     String?
+  returnDepositFileId  String?
+  returnConfirmedById  String?
+  returnConfirmedAt    DateTime?
+  paymentExecutedAt    DateTime?
+  paymentRef           String?
+  paymentNotes         String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  requester                User           @relation("RequestRequester", fields: [requesterId], references: [id])
+  department               Department?    @relation(fields: [departmentId], references: [id])
+  project                  Project?       @relation(fields: [projectId], references: [id])
+  budgetOverrideApprovedBy User?          @relation("RequestBudgetOverrideBy", fields: [budgetOverrideApprovedById], references: [id])
+  returnConfirmedBy        User?          @relation("RequestReturnConfirmedBy", fields: [returnConfirmedById], references: [id])
+  returnDepositFile        StoredFile?    @relation("ReturnDepositFile", fields: [returnDepositFileId], references: [id])
+  items                    ExpenseItem[]
+  approvalSteps            ApprovalStep[]
+
+  @@index([status])
+  @@index([requesterId])
+  @@index([departmentId, budgetYear, budgetMonth])
+  @@index([projectId])
+  @@index([currentStepEnteredAt])
+}
+
+model ExpenseItem {
+  id               String          @id @default(cuid())
+  expenseRequestId String
+  categoryId       String
+  expenseDate      DateTime
+  vendorName       String
+  vendorTaxId      String
+  invoiceNumber    String
+  description      String
+  claimedAmount    Decimal         @db.Decimal(12, 2)
+  approvedAmount   Decimal?        @db.Decimal(12, 2)
+  auditStatus      ItemAuditStatus @default(PENDING)
+  auditNote        String?
+  auditedById      String?
+  auditedAt        DateTime?
+  receiptFileId    String?
+  duplicateWarning Boolean         @default(false)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  expenseRequest ExpenseRequest @relation(fields: [expenseRequestId], references: [id], onDelete: Cascade)
+  category       Category       @relation(fields: [categoryId], references: [id])
+  auditedBy      User?          @relation("ItemAuditedBy", fields: [auditedById], references: [id])
+  receiptFile    StoredFile?    @relation("ItemReceiptFile", fields: [receiptFileId], references: [id])
+
+  @@index([expenseRequestId])
+  @@index([vendorTaxId, invoiceNumber])
+}
+
+model ApprovalStep {
+  id                 String             @id @default(cuid())
+  expenseRequestId   String
+  phase              ApprovalPhase
+  stepOrder          Int
+  requiredRole       ApprovalRoleType
+  assignedApproverId String?
+  delegatedToUserId  String?
+  delegationId       String?
+  actedByUserId      String?
+  status             ApprovalStepStatus
+  comment            String?
+  enteredAt          DateTime?
+  actedAt            DateTime?
+  ipAddress          String?
+  createdAt          DateTime           @default(now())
+
+  expenseRequest   ExpenseRequest      @relation(fields: [expenseRequestId], references: [id], onDelete: Cascade)
+  assignedApprover User?               @relation("StepAssignedApprover", fields: [assignedApproverId], references: [id])
+  delegatedToUser  User?               @relation("StepDelegatedTo", fields: [delegatedToUserId], references: [id])
+  delegation       ApprovalDelegation? @relation(fields: [delegationId], references: [id])
+  actedByUser      User?               @relation("StepActedBy", fields: [actedByUserId], references: [id])
+
+  @@index([expenseRequestId, phase, stepOrder])
+  @@index([status])
+  @@index([assignedApproverId, status])
+  @@index([delegatedToUserId, status])
+}
+
+model StoredFile {
+  id           String      @id @default(cuid())
+  originalName String
+  storedName   String      @unique
+  mimeType     String
+  sizeBytes    Int
+  storagePath  String
+  purpose      FilePurpose
+  uploadedById String
+  createdAt    DateTime    @default(now())
+
+  uploadedBy     User             @relation("FileUploader", fields: [uploadedById], references: [id])
+  expenseItems   ExpenseItem[]    @relation("ItemReceiptFile")
+  returnDeposits ExpenseRequest[] @relation("ReturnDepositFile")
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  type      NotificationType
+  title     String
+  message   String
+  linkUrl   String?
+  isRead    Boolean          @default(false)
+  emailSent Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead, createdAt])
+}
+
+model AuditLog {
+  id               String   @id @default(cuid())
+  timestamp        DateTime @default(now())
+  actorUserId      String?
+  actorName        String
+  actorRole        String
+  onBehalfOfUserId String?
+  onBehalfOfName   String?
+  delegationReason String?
+  entityType       String
+  entityId         String
+  action           String
+  summary          String
+  previousState    Json?
+  newState         Json?
+  ipAddress        String?
+  userAgent        String?
+
+  actorUser      User? @relation("AuditActor", fields: [actorUserId], references: [id])
+  onBehalfOfUser User? @relation("AuditOnBehalfOf", fields: [onBehalfOfUserId], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([timestamp])
+  @@index([actorUserId])
+}
